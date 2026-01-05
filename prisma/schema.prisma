@@ -1,0 +1,68 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./geo-platform.db"
+}
+
+model Platform {
+  id          String   @id @default(cuid())
+  name        String   // 平台名称（豆包、千问等）
+  url         String   // 平台网址
+  isLoggedIn  Boolean  @default(false)
+  sessionData String?  // 浏览器会话数据
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  queries     Query[]
+}
+
+model Product {
+  id             String   @id @default(cuid())
+  name           String   // 产品名称
+  targetAudience String   // 目标客户群体
+  sellingPoints  String   // 卖点
+  coreContent    String   // 核心推广内容
+  createdAt      DateTime @default(now())
+  questions      Question[]
+}
+
+model Question {
+  id        String   @id @default(cuid())
+  productId String
+  product   Product  @relation(fields: [productId], references: [id])
+  text      String   // 问题内容
+  createdAt DateTime @default(now())
+  queries   Query[]
+}
+
+model Query {
+  id         String   @id @default(cuid())
+  questionId String
+  question   Question @relation(fields: [questionId], references: [id])
+  platformId String
+  platform   Platform @relation(fields: [platformId], references: [id])
+  response   String   // AI回答内容
+  hasProduct Boolean  @default(false) // 是否包含推广产品
+  sources    String?  // 来源网站JSON
+  createdAt  DateTime @default(now())
+}
+
+model Analysis {
+  id            String   @id @default(cuid())
+  totalQueries  Int
+  mentionedCount Int     // 产品被提及次数
+  adoptionRate  Float    // 采信率
+  topSources    String   // 热门来源网站JSON
+  createdAt     DateTime @default(now())
+}
+
+model Settings {
+  id              String   @id @default(cuid())
+  llmApiUrl       String   @default("https://api.openai.com/v1")
+  llmApiKey       String?
+  llmModel        String   @default("gpt-3.5-turbo")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}

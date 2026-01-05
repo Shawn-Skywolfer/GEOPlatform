@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm install:*)",
+      "Bash(npx prisma db push:*)",
+      "Bash(npm run dev)",
+      "Bash(sqlite3:*)",
+      "Bash(node scripts/init-platforms.js:*)",
+      "Bash(npx tsx:*)",
+      "Bash(npx playwright install:*)",
+      "Bash(git init:*)",
+      "Bash(git add:*)"
+    ]
+  }
+}
