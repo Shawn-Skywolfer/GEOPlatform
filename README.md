@@ -133,7 +133,7 @@ GEOPlatform/
 ## 支持的AI平台
 
 - 豆包 - https://www.doubao.com
-- 千问 - https://tongyi.aliyun.com
+- 千问 - https://qianwen.com
 - 文心一言 - https://yiyan.baidu.com
 - DeepSeek - https://www.deepseek.com
 - 智谱 - https://chatglm.cn
