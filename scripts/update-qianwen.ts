@@ -1,4 +1,4 @@
-import { prisma } from '../src/lib/prisma.ts';
+import { prisma } from '../src/lib/prisma';
 
 async function updateQianwenUrl() {
   console.log('更新千问地址...');

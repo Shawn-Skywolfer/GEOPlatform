@@ -53,7 +53,7 @@ export async function POST(request: NextRequest) {
       if (productInfo.sellingPoints) {
         const points = productInfo.sellingPoints.split('\n');
         matchedPoints = points
-          .filter(point => responseLower.includes(point.toLowerCase()))
+          .filter((point: string) => responseLower.includes(point.toLowerCase()))
           .slice(0, 5);
       }
     }
@@ -81,7 +81,7 @@ export async function POST(request: NextRequest) {
       if (productInfo.sellingPoints) {
         const points = productInfo.sellingPoints.split('\n');
         matchedPoints = points
-          .filter(point => responseLower.includes(point.toLowerCase()))
+          .filter((point: string) => responseLower.includes(point.toLowerCase()))
           .slice(0, 5);
       }
 

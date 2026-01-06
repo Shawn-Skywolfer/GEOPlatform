@@ -66,3 +66,15 @@ model Settings {
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 }
+
+model PromptTemplate {
+  id          String   @id @default(cuid())
+  name        String   @unique // 模板名称（如 "question-generation"）
+  displayName String   // 显示名称（如 "问题生成模板"）
+  description String?  // 描述
+  template    String   // Prompt模板内容
+  variables   String   // 模板变量列表（JSON格式）
+  isActive    Boolean  @default(true) // 是否启用
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}

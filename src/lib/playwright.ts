@@ -1,6 +1,7 @@
 // Playwright浏览器自动化库
 import { chromium, Browser, BrowserContext, Page } from 'playwright';
 import { prisma } from '@/lib/prisma';
+import { PlatformAdapterFactory } from '@/lib/platform-adapters';
 import type { Platform } from '@/types';
 
 // 浏览器实例管理
@@ -13,38 +14,93 @@ const contexts = new Map<string, BrowserContext>();
 async function getBrowser(): Promise<Browser> {
   if (!browser) {
     browser = await chromium.launch({
-      headless: false, // 设置为true可以无头模式运行
+      headless: false,
+      args: [
+        '--disable-blink-features=AutomationControlled',
+        '--disable-features=IsolateOrigins,site-per-process',
+      ],
     });
   }
   return browser;
 }
 
 /**
+ * 获取默认的浏览器上下文配置
+ */
+function getDefaultContextOptions() {
+  return {
+    viewport: { width: 1920, height: 1080 },
+    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+    locale: 'zh-CN',
+    timezoneId: 'Asia/Shanghai',
+    permissions: ['geolocation', 'notifications'],
+    bypassCSP: true,
+    ignoreHTTPSErrors: true,
+  };
+}
+
+/**
  * 获取平台的浏览器上下文
  */
 async function getPlatformContext(platform: Platform): Promise<BrowserContext> {
-  // 如果已有上下文，先关闭
+  // 如果已有上下文，先检查是否可用
   if (contexts.has(platform.id)) {
     const existingContext = contexts.get(platform.id)!;
-    if (!existingContext.pages().length) {
-      await existingContext.close();
-      contexts.delete(platform.id);
-    } else {
+    if (existingContext.pages().length > 0) {
       return existingContext;
     }
+    // 如果没有页面了，关闭并重新创建
+    await existingContext.close();
+    contexts.delete(platform.id);
   }
 
   // 创建新上下文
   const browser = await getBrowser();
+  const defaultOptions = getDefaultContextOptions();
   let context: BrowserContext;
 
   // 如果有保存的会话数据，恢复会话
   if (platform.sessionData) {
-    const cookies = JSON.parse(platform.sessionData);
-    context = await browser.newContext({ storageState: { cookies, origins: [] } });
+    try {
+      const parsed = JSON.parse(platform.sessionData);
+
+      // 检查数据格式
+      let storageState;
+
+      if (Array.isArray(parsed)) {
+        // 旧格式：纯 cookies 数组
+        storageState = { cookies: parsed, origins: [] };
+      } else if (parsed && typeof parsed === 'object' && 'cookies' in parsed) {
+        // 新格式：完整的 storageState 对象
+        storageState = parsed;
+      } else {
+        // 未知格式，创建新上下文
+        console.warn('未知的会话数据格式，创建新上下文');
+        storageState = null;
+      }
+
+      if (storageState) {
+        context = await browser.newContext({
+          ...defaultOptions,
+          storageState,
+        });
+      } else {
+        context = await browser.newContext(defaultOptions);
+      }
+    } catch (error) {
+      console.error('恢复会话失败，创建新上下文:', error);
+      context = await browser.newContext(defaultOptions);
+    }
   } else {
-    context = await browser.newContext();
+    context = await browser.newContext(defaultOptions);
   }
+
+  // 隐藏webdriver特征
+  await context.addInitScript(() => {
+    Object.defineProperty(navigator, 'webdriver', {
+      get: () => false,
+    });
+  });
 
   contexts.set(platform.id, context);
   return context;
@@ -54,13 +110,20 @@ async function getPlatformContext(platform: Platform): Promise<BrowserContext> {
  * 保存平台会话数据
  */
 async function savePlatformSession(platformId: string, context: BrowserContext): Promise<void> {
-  const cookies = await context.cookies();
-  const sessionData = JSON.stringify(cookies);
+  try {
+    // 获取完整的 storageState
+    const storageState = await context.storageState();
 
-  await prisma.platform.update({
-    where: { id: platformId },
-    data: { sessionData },
-  });
+    // 保存为 JSON 字符串
+    const sessionData = JSON.stringify(storageState);
+
+    await prisma.platform.update({
+      where: { id: platformId },
+      data: { sessionData },
+    });
+  } catch (error) {
+    console.error('保存会话失败:', error);
+  }
 }
 
 /**
@@ -113,6 +176,8 @@ export async function askQuestion(
   platformId: string,
   question: string
 ): Promise<{ success: boolean; response?: string; sources?: string[]; error?: string }> {
+  let page: Page | null = null;
+
   try {
     const platform = await prisma.platform.findUnique({
       where: { id: platformId },
@@ -123,36 +188,66 @@ export async function askQuestion(
     }
 
     if (!platform.isLoggedIn) {
-      return { success: false, error: '平台未登录' };
+      return { success: false, error: '平台未登录，请先登录' };
+    }
+
+    // 获取平台适配器（通过平台名称匹配）
+    const adapter = PlatformAdapterFactory.getAdapterByName(platform.name);
+    if (!adapter) {
+      return { success: false, error: `平台 "${platform.name}" 暂不支持自动提问` };
     }
 
     const context = await getPlatformContext(platform);
-    const page = await context.newPage();
+    page = await context.newPage();
 
-    await page.goto(platform.url);
+    // 导航到平台
+    await page.goto(platform.url, { waitUntil: 'networkidle', timeout: 30000 });
+    await page.waitForTimeout(2000); // 等待页面加载完成
 
-    // 这里需要根据不同平台的具体页面结构来实现
-    // 以下是一个通用的示例流程，实际需要针对每个平台定制
+    // 记录当前消息数量（用于判断新回答）
+    const initialMessageCount = await page.locator('[class*="message"], [class*="chat"], [class*="conversation"]').count();
 
-    // 1. 找到输入框
-    // 2. 输入问题
-    // 3. 点击发送按钮
-    // 4. 等待回答
-    // 5. 提取回答内容和来源链接
+    // 使用适配器提问
+    const askResult = await adapter.askQuestion(page, question);
 
-    // 由于每个平台的DOM结构都不同，这里提供一个简化的示例
-    // 实际实现需要针对每个平台编写特定的选择器和逻辑
+    if (!askResult.success) {
+      return { success: false, error: askResult.error };
+    }
 
-    // 通用等待（给AI一些时间生成回答）
-    await page.waitForTimeout(10000);
+    // 等待回答生成
+    await adapter.waitForResponse(page);
+    await page.waitForTimeout(3000); // 额外等待确保内容完全加载
 
-    // 提取回答（这需要根据实际页面结构调整选择器）
-    const responseElement = await page.locator('div.ai-response, .answer, .chat-message').first();
-    const response = await responseElement.textContent() || '';
+    // 尝试从适配器提取回答（如果支持）
+    let response = '';
+    let sources: string[] = [];
+
+    // 尝试从不同的适配器方法提取回答
+    if ('extractResponse' in adapter && typeof adapter.extractResponse === 'function') {
+      try {
+        response = await (adapter as any).extractResponse(page);
+      } catch {
+        // 忽略错误，使用备用方法
+      }
+    }
+
+    // 如果没有提取到回答，使用通用方法
+    if (!response) {
+      response = await extractResponseGeneric(page, initialMessageCount);
+    }
 
     // 提取来源链接
-    const sourceLinks = await page.locator('a.source-link, .reference a').allTextContents();
-    const sources = sourceLinks.map(link => link.trim()).filter(Boolean);
+    if ('extractSources' in adapter && typeof adapter.extractSources === 'function') {
+      try {
+        sources = await (adapter as any).extractSources(page);
+      } catch {
+        // 忽略错误
+      }
+    }
+
+    if (!sources.length) {
+      sources = await extractSourcesGeneric(page);
+    }
 
     // 保存会话
     await savePlatformSession(platformId, context);
@@ -165,9 +260,81 @@ export async function askQuestion(
       sources,
     };
   } catch (error) {
+    if (page) {
+      try {
+        await page.close();
+      } catch {
+        // 忽略关闭错误
+      }
+    }
     console.error('提问错误:', error);
-    return { success: false, error: `提问失败: ${error}` };
+    return { success: false, error: `提问失败: ${error instanceof Error ? error.message : String(error)}` };
   }
+}
+
+/**
+ * 通用回答提取方法
+ */
+async function extractResponseGeneric(page: Page, initialMessageCount: number): Promise<string> {
+  const selectors = [
+    '[class*="assistant"]:last-child',
+    '[class*="ai-message"]:last-child',
+    '[class*="bot-message"]:last-child',
+    '[class*="message-content"]:last-child',
+    '.markdown-body:last-child',
+    '[class*="chat-response"]:last-child',
+  ];
+
+  for (const selector of selectors) {
+    try {
+      const elements = await page.locator(selector).all();
+      // 获取最后一个元素（最新的回答）
+      if (elements.length > 0) {
+        const lastElement = elements[elements.length - 1];
+        const text = await lastElement.textContent();
+        if (text && text.trim() && text.trim().length > 10) {
+          return text.trim();
+        }
+      }
+    } catch {
+      continue;
+    }
+  }
+
+  // 如果上述方法都失败，尝试获取页面文本
+  try {
+    const bodyText = await page.locator('body').textContent();
+    return bodyText?.slice(-1000).trim() || '';
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * 通用来源链接提取方法
+ */
+async function extractSourcesGeneric(page: Page): Promise<string[]> {
+  const sources: string[] = [];
+  try {
+    // 查找所有可能的外部链接
+    const links = await page.locator('a[href*="http"]').all();
+    for (const link of links) {
+      try {
+        const href = await link.getAttribute('href');
+        if (href && href.startsWith('http') && !href.includes('localhost')) {
+          // 避免重复
+          if (!sources.includes(href)) {
+            sources.push(href);
+          }
+        }
+      } catch {
+        continue;
+      }
+    }
+  } catch {
+    // 忽略错误
+  }
+  return sources.slice(0, 10); // 最多返回10个链接
 }
 
 /**

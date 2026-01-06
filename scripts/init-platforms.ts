@@ -1,4 +1,4 @@
-import { prisma } from '../src/lib/prisma.ts';
+import { prisma } from '../src/lib/prisma';
 
 const SUPPORTED_PLATFORMS = [
   { id: 'doubao', name: '豆包', url: 'https://www.doubao.com' },

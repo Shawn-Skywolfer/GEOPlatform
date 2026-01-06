@@ -54,10 +54,10 @@ export interface Settings {
 
 // 支持的平台配置
 export const SUPPORTED_PLATFORMS = [
-  { id: 'doubao', name: '豆包', url: 'https://www.doubao.com' },
-  { id: 'qianwen', name: '千问', url: 'https://www.qianwen.com' },
+  { id: 'doubao', name: '豆包', url: 'https://www.doubao.com/chat/' },
+  { id: 'qianwen', name: '千问', url: 'https://qianwen.aliyun.com/chat' },
   { id: 'yiyan', name: '文心一言', url: 'https://yiyan.baidu.com' },
-  { id: 'deepseek', name: 'DeepSeek', url: 'https://www.deepseek.com' },
+  { id: 'deepseek', name: 'DeepSeek', url: 'https://chat.deepseek.com' },
   { id: 'zhipu', name: '智谱', url: 'https://chatglm.cn' },
   { id: 'kimi', name: 'Kimi', url: 'https://kimi.moonshot.cn' },
 ] as const;

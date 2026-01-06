@@ -5,8 +5,8 @@ import type { GenerateQuestionsRequest, GenerateQuestionsResponse } from '@/type
 
 export async function POST(request: NextRequest) {
   try {
-    const body: GenerateQuestionsRequest = await request.json();
-    const { targetAudience, productName, sellingPoints, coreContent } = body;
+    const body: GenerateQuestionsRequest & { customPrompt?: string } = await request.json();
+    const { targetAudience, productName, sellingPoints, coreContent, customPrompt } = body;
 
     // 验证请求参数
     if (!targetAudience || !productName || !sellingPoints || !coreContent) {
@@ -16,13 +16,25 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 生成提示词
-    const prompt = getQuestionGenerationPrompt(
-      targetAudience,
-      productName,
-      sellingPoints,
-      coreContent
-    );
+    // 生成提示词（使用自定义Prompt或默认Prompt）
+    let prompt: string;
+
+    if (customPrompt) {
+      // 使用自定义Prompt模板，替换变量
+      prompt = customPrompt
+        .replace(/\{\{targetAudience\}\}/g, targetAudience)
+        .replace(/\{\{productName\}\}/g, productName)
+        .replace(/\{\{sellingPoints\}\}/g, sellingPoints)
+        .replace(/\{\{coreContent\}\}/g, coreContent);
+    } else {
+      // 使用默认Prompt生成函数
+      prompt = getQuestionGenerationPrompt(
+        targetAudience,
+        productName,
+        sellingPoints,
+        coreContent
+      );
+    }
 
     // 调用大模型生成问题
     const response = await callLLM({
