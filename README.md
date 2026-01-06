@@ -132,10 +132,10 @@ GEOPlatform/
 
 ## 支持的AI平台
 
-- 豆包 - https://www.doubao.com
-- 千问 - https://www.qianwen.com
+- 豆包 - https://www.doubao.com/chat/
+- 千问 - https://qianwen.aliyun.com/chat
 - 文心一言 - https://yiyan.baidu.com
-- DeepSeek - https://www.deepseek.com
+- DeepSeek - https://chat.deepseek.com
 - 智谱 - https://chatglm.cn
 - Kimi - https://kimi.moonshot.cn
 
