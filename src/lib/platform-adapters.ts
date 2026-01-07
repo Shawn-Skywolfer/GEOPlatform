@@ -427,9 +427,65 @@ export class YiyanAdapter implements PlatformAdapter {
 export class DeepSeekAdapter implements PlatformAdapter {
   async askQuestion(page: Page, question: string): Promise<AskResult> {
     try {
-      const inputSelector = 'div[contenteditable="true"], textarea[placeholder*="Message"], textarea[placeholder*="输入"]';
+      // 扩展选择器列表，增加更多可能的DeepSeek输入框选择器
+      const inputSelectors = [
+        // DeepSeek特定选择器（基于常见聊天界面）
+        'textarea[data-placeholder]',
+        'textarea[placeholder*="message" i]',
+        'textarea[placeholder*="输入" i]',
+        'div[contenteditable="true"][data-placeholder]',
+        '#chat-input',
+        'input[type="text"]',
+        'textarea:not([readonly])',
+        // 通用选择器
+        'div[contenteditable="true"]',
+        'textarea[placeholder*="Message"]',
+        'textarea[placeholder*="输入"]',
+      ];
 
-      await page.waitForSelector(inputSelector, { timeout: 10000 });
+      let inputFound = false;
+      let inputSelector = '';
+
+      // 尝试每个选择器
+      for (const selector of inputSelectors) {
+        try {
+          await page.waitForSelector(selector, { timeout: 3000, state: 'visible' });
+          inputSelector = selector;
+          inputFound = true;
+          console.log(`DeepSeek: 找到输入框，使用选择器: ${selector}`);
+          break;
+        } catch {
+          continue;
+        }
+      }
+
+      if (!inputFound) {
+        // 如果所有选择器都失败，尝试等待页面加载并重试
+        await page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => {});
+
+        // 第二轮尝试，使用更宽松的条件
+        for (const selector of inputSelectors.slice(0, 5)) {
+          try {
+            const element = page.locator(selector).first();
+            if (await element.count() > 0) {
+              inputSelector = selector;
+              inputFound = true;
+              console.log(`DeepSeek: 第二轮找到输入框，使用选择器: ${selector}`);
+              break;
+            }
+          } catch {
+            continue;
+          }
+        }
+      }
+
+      if (!inputFound) {
+        return {
+          success: false,
+          error: 'DeepSeek: 无法找到输入框，请检查页面是否已加载完成或网站结构是否已更改'
+        };
+      }
+
       await page.click(inputSelector);
       await page.fill(inputSelector, question);
       await page.waitForTimeout(500);
@@ -468,45 +524,152 @@ export class DeepSeekAdapter implements PlatformAdapter {
   }
 
   async waitForResponse(page: Page): Promise<void> {
+    // DeepSeek特定的回答容器选择器
     const responseSelectors = [
+      // DeepSeek特定的选择器（基于常见的聊天界面结构）
+      '[data-testid="assistant-message"]',
+      '[data-message-role="assistant"]',
+      '.conversation-item.assistant',
+      '.message-row.assistant',
+      '.chat-message.assistant',
+      '.assistant-message',
+      // 通用选择器
       '[class*="assistant"]',
       '[class*="ai-message"]',
       '.message.assistant',
       '[class*="response"]'
     ];
 
+    // 减少超时时间，优化响应速度
     for (const selector of responseSelectors) {
       try {
-        await page.waitForSelector(selector, { timeout: 30000, state: 'attached' });
-        await page.waitForTimeout(2000);
+        await page.waitForSelector(selector, { timeout: 15000, state: 'attached' });
+        await page.waitForTimeout(1000); // 减少额外等待时间
         return;
       } catch {
         continue;
       }
     }
 
-    await page.waitForTimeout(5000);
+    // 如果所有选择器都失败，等待较短时间
+    await page.waitForTimeout(2000);
   }
 
   async extractResponse(page: Page): Promise<string> {
-    const selectors = [
-      '[class*="assistant"]:last-child',
-      '[class*="ai-message"]:last-child',
-      '.message.assistant:last-child'
-    ];
+    try {
+      // 使用JavaScript直接在页面中提取真正的回答内容
+      // 这样可以避免获取到intercom等第三方内容
+      const result = await page.evaluate(() => {
+        // 移除intercom等第三方元素
+        const intercomElements = document.querySelectorAll('[class*="intercom"], [id*="intercom"]');
+        intercomElements.forEach(el => el.remove());
 
-    for (const selector of selectors) {
-      try {
-        const element = page.locator(selector).first();
-        if (await element.isVisible({ timeout: 2000 })) {
-          const text = await element.textContent();
-          if (text && text.trim()) {
-            return text.trim();
+        // 移除style和script标签
+        const styles = document.querySelectorAll('style, script, link[rel="stylesheet"]');
+        styles.forEach(el => el.remove());
+
+        // 查找AI回答的多种可能选择器
+        const selectors = [
+          '[data-testid="assistant-message"]',
+          '[data-message-role="assistant"]',
+          '.conversation-item.assistant',
+          '.message-row.assistant',
+          '.chat-message.assistant',
+          '.assistant-message',
+          '[class*="assistant"]',
+          '[class*="ai-message"]',
+          '.message.assistant',
+        ];
+
+        let bestAnswer = '';
+        let maxLength = 0;
+
+        for (const selector of selectors) {
+          const elements = document.querySelectorAll(selector);
+
+          // 获取最后一个元素（最新的回答）
+          if (elements.length > 0) {
+            const lastElement = elements[elements.length - 1];
+
+            // 使用innerText而不是textContent，因为innerText不获取隐藏元素
+            let text = lastElement.innerText || lastElement.textContent || '';
+
+            if (text && text.trim().length > maxLength) {
+              // 检查不是纯CSS代码
+              const trimmed = text.trim();
+
+              // 检查是否包含足够的中英文内容
+              const hasContent = /[\u4e00-\u9fa5a-zA-Z]{30,}/.test(trimmed);
+
+              // 检查不是CSS（CSS通常有特定的模式）
+              const isLikelyCss =
+                trimmed.includes('{') && trimmed.includes('}') &&
+                trimmed.includes(':') && trimmed.includes(';') &&
+                (trimmed.includes('position:') || trimmed.includes('background-color:') || trimmed.includes('@media'));
+
+              if (hasContent && !isLikelyCss) {
+                bestAnswer = trimmed;
+                maxLength = trimmed.length;
+              }
+            }
           }
         }
-      } catch {
-        continue;
+
+        return bestAnswer;
+      });
+
+      if (result && result.length > 50) {
+        return result;
       }
+    } catch (error) {
+      console.error('DeepSeek JavaScript提取失败:', error);
+    }
+
+    // 如果JavaScript方法失败，使用传统方法
+    return await this.extractResponseFallback(page);
+  }
+
+  private async extractResponseFallback(page: Page): Promise<string> {
+    // 备用方法：尝试从页面主体内容中提取
+    try {
+      const selectors = [
+        'article',
+        'main',
+        '[role="main"]',
+        '.content',
+        '.markdown-body',
+        '#chat-content',
+        '.conversation',
+      ];
+
+      for (const selector of selectors) {
+        try {
+          const element = page.locator(selector).first();
+          if (await element.count() > 0) {
+            const text = await element.textContent() || '';
+
+            if (text && text.trim().length > 100) {
+              let cleanText = text.trim();
+
+              // 移除style标签内容
+              cleanText = cleanText.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '');
+              cleanText = cleanText.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '');
+              cleanText = cleanText.replace(/<link[^>]*>/gi, '');
+
+              // 检查不包含intercom且不是CSS
+              if (!cleanText.toLowerCase().includes('intercom') &&
+                  cleanText.length > 50 &&
+                  /[\u4e00-\u9fa5a-zA-Z]{30,}/.test(cleanText)) {
+                return cleanText;
+              }
+            }
+          }
+        } catch {
+          continue;
+        }
+      }
+    } catch {
+      // 忽略错误
     }
 
     return '';

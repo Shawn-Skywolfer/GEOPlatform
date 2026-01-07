@@ -86,7 +86,7 @@ export default function QuestionsPage() {
       const response = await fetch('/api/prompt-templates');
       const data = await response.json();
       const template = data.templates?.find((t: any) => t.name === 'question-generation');
-      if (template) {
+      if (template && template.template) {
         setCurrentPrompt(template.template);
       } else {
         setCurrentPrompt(defaultPrompt);
@@ -127,6 +127,24 @@ export default function QuestionsPage() {
   };
 
   const handleSavePrompt = async () => {
+    // 验证Prompt模板不为空
+    if (!currentPrompt || currentPrompt.trim().length === 0) {
+      alert('Prompt模板不能为空');
+      return;
+    }
+
+    // 验证必要的变量占位符存在
+    const requiredVariables = ['targetAudience', 'productName', 'sellingPoints', 'coreContent'];
+    const missingVariables = requiredVariables.filter(
+      variable => !currentPrompt.includes(`{{${variable}}}`)
+    );
+
+    if (missingVariables.length > 0) {
+      alert(`Prompt模板缺少必要的变量占位符：\n${missingVariables.map(v => `{{${v}}}`).join(', ')}\n\n请确保包含所有必要的变量占位符。`);
+      return;
+    }
+
+    setSaving(true);
     try {
       const response = await fetch('/api/prompt-templates', {
         method: 'POST',
@@ -136,17 +154,21 @@ export default function QuestionsPage() {
           displayName: '问题生成模板',
           description: '用于生成GEO测试问题的Prompt模板',
           template: currentPrompt,
-          variables: ['targetAudience', 'productName', 'sellingPoints', 'coreContent'],
+          variables: requiredVariables,
         }),
       });
+
+      const data = await response.json();
 
       if (response.ok) {
         alert('Prompt模板已保存');
       } else {
-        alert('保存失败');
+        alert(`保存失败: ${data.error || '未知错误'}`);
       }
     } catch (error) {
-      alert(`保存失败: ${error}`);
+      alert(`保存失败: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -218,10 +240,23 @@ export default function QuestionsPage() {
               <CardHeader>
                 <CardTitle>Prompt 模板编辑</CardTitle>
                 <CardDescription>
-                  自定义问题生成的Prompt模板。使用 {{变量名}} 作为占位符。
+                  自定义问题生成的Prompt模板。使用 <code className="bg-muted px-1 py-0.5 rounded">{'{{变量名}}'}</code> 作为占位符。
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
+                <div className="bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800 rounded-lg p-3">
+                  <p className="text-sm font-medium mb-2">可用的变量占位符：</p>
+                  <div className="grid grid-cols-2 gap-2 text-sm">
+                    <code className="bg-background px-2 py-1 rounded">{'{{targetAudience}}'}</code>
+                    <span className="text-muted-foreground">- 目标客户群体</span>
+                    <code className="bg-background px-2 py-1 rounded">{'{{productName}}'}</code>
+                    <span className="text-muted-foreground">- 产品名称</span>
+                    <code className="bg-background px-2 py-1 rounded">{'{{sellingPoints}}'}</code>
+                    <span className="text-muted-foreground">- 产品卖点</span>
+                    <code className="bg-background px-2 py-1 rounded">{'{{coreContent}}'}</code>
+                    <span className="text-muted-foreground">- 核心推广内容</span>
+                  </div>
+                </div>
                 <Textarea
                   value={currentPrompt}
                   onChange={(e) => setCurrentPrompt(e.target.value)}
@@ -230,10 +265,10 @@ export default function QuestionsPage() {
                   placeholder="输入Prompt模板..."
                 />
                 <div className="flex space-x-2">
-                  <Button onClick={handleSavePrompt}>
-                    保存Prompt
+                  <Button onClick={handleSavePrompt} disabled={saving}>
+                    {saving ? '保存中...' : '保存Prompt'}
                   </Button>
-                  <Button variant="outline" onClick={handleResetPrompt}>
+                  <Button variant="outline" onClick={handleResetPrompt} disabled={saving}>
                     重置为默认
                   </Button>
                 </div>

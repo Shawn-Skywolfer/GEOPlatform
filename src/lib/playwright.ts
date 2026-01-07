@@ -11,7 +11,7 @@ const contexts = new Map<string, BrowserContext>();
 /**
  * 获取或创建浏览器实例
  */
-async function getBrowser(): Promise<Browser> {
+export async function getBrowser(): Promise<Browser> {
   if (!browser) {
     browser = await chromium.launch({
       headless: false,
@@ -170,6 +170,78 @@ export async function loginPlatform(platformId: string): Promise<{ success: bool
 }
 
 /**
+ * 打开平台浏览器让用户登录（两步流程：第一步）
+ * 这个函数会打开浏览器后立即返回，不等待用户登录完成
+ */
+export async function openPlatformBrowser(platformId: string): Promise<{ success: boolean; message: string; browserOpened?: boolean }> {
+  try {
+    const platform = await prisma.platform.findUnique({
+      where: { id: platformId },
+    });
+
+    if (!platform) {
+      return { success: false, message: '平台不存在' };
+    }
+
+    const context = await getPlatformContext(platform);
+    const page = await context.newPage();
+
+    await page.goto(platform.url);
+
+    // 不等待登录完成，立即返回
+    // 保持页面打开，让用户在浏览器中手动登录
+
+    return {
+      success: true,
+      message: `已打开${platform.name}的登录页面，请在浏览器中完成登录。登录完成后，请返回平台管理界面点击"确认登录完成"按钮。`,
+      browserOpened: true
+    };
+  } catch (error) {
+    console.error('打开浏览器错误:', error);
+    return { success: false, message: `打开浏览器失败: ${error}` };
+  }
+}
+
+/**
+ * 确认平台登录完成（两步流程：第二步）
+ * 保存当前浏览器会话到数据库
+ */
+export async function confirmPlatformLogin(platformId: string): Promise<{ success: boolean; message: string }> {
+  try {
+    const platform = await prisma.platform.findUnique({
+      where: { id: platformId },
+    });
+
+    if (!platform) {
+      return { success: false, message: '平台不存在' };
+    }
+
+    // 获取当前平台的浏览器上下文
+    const context = await getPlatformContext(platform);
+
+    // 保存会话
+    await savePlatformSession(platformId, context);
+
+    // 更新登录状态
+    await prisma.platform.update({
+      where: { id: platformId },
+      data: { isLoggedIn: true },
+    });
+
+    // 关闭所有打开的页面
+    const pages = context.pages();
+    for (const page of pages) {
+      await page.close();
+    }
+
+    return { success: true, message: '登录会话已保存成功' };
+  } catch (error) {
+    console.error('保存登录会话错误:', error);
+    return { success: false, message: `保存会话失败: ${error}` };
+  }
+}
+
+/**
  * 在平台上提问
  */
 export async function askQuestion(
@@ -200,8 +272,8 @@ export async function askQuestion(
     const context = await getPlatformContext(platform);
     page = await context.newPage();
 
-    // 导航到平台
-    await page.goto(platform.url, { waitUntil: 'networkidle', timeout: 30000 });
+    // 导航到平台（使用domcontentloaded而不是networkidle来避免超时）
+    await page.goto(platform.url, { waitUntil: 'domcontentloaded', timeout: 30000 });
     await page.waitForTimeout(2000); // 等待页面加载完成
 
     // 记录当前消息数量（用于判断新回答）
@@ -274,24 +346,29 @@ export async function askQuestion(
 
 /**
  * 通用回答提取方法
+ * 只提取提问后新出现的回答，避免包含历史对话
  */
 async function extractResponseGeneric(page: Page, initialMessageCount: number): Promise<string> {
   const selectors = [
-    '[class*="assistant"]:last-child',
-    '[class*="ai-message"]:last-child',
-    '[class*="bot-message"]:last-child',
-    '[class*="message-content"]:last-child',
-    '.markdown-body:last-child',
-    '[class*="chat-response"]:last-child',
+    '[class*="assistant"]',
+    '[class*="ai-message"]',
+    '[class*="bot-message"]',
+    '[class*="message-content"]',
+    '.markdown-body',
+    '[class*="chat-response"]',
   ];
 
   for (const selector of selectors) {
     try {
       const elements = await page.locator(selector).all();
-      // 获取最后一个元素（最新的回答）
-      if (elements.length > 0) {
-        const lastElement = elements[elements.length - 1];
-        const text = await lastElement.textContent();
+      // 只获取新出现的消息（超过初始数量的部分）
+      const newElements = elements.slice(initialMessageCount);
+
+      if (newElements.length > 0) {
+        // 获取最新的一条消息
+        const newestElement = newElements[newElements.length - 1];
+        const text = await newestElement.textContent();
+
         if (text && text.trim() && text.trim().length > 10) {
           return text.trim();
         }

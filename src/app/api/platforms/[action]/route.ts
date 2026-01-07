@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { loginPlatform as playwrightLoginPlatform, logoutPlatform as playwrightLogoutPlatform, openPlatformBrowser, confirmPlatformLogin } from '@/lib/playwright';
 
 // 平台登录/登出操作
 export async function POST(
@@ -19,24 +20,22 @@ export async function POST(
     }
 
     if (action === 'login') {
-      // 简化方案：直接将平台标记为已登录
-      // 用户在实际使用时需要手动在浏览器中登录对应平台
-      // 系统使用此状态来启用自动提问功能
-      await prisma.platform.update({
-        where: { id: platformId },
-        data: {
-          isLoggedIn: true,
-          sessionData: JSON.stringify({ loggedInAt: new Date().toISOString() }),
-        },
-      });
+      // 使用Playwright打开浏览器让用户登录
+      const result = await openPlatformBrowser(platformId);
+      return NextResponse.json(result);
+    }
 
-      return NextResponse.json({
-        success: true,
-        message: '平台已标记为已登录。注意：实际使用时请确保您已在浏览器中登录该平台。',
-      });
+    if (action === 'confirm-login') {
+      // 用户确认登录完成，保存会话
+      const result = await confirmPlatformLogin(platformId);
+      return NextResponse.json(result);
     }
 
     if (action === 'logout') {
+      // 先清除Playwright的会话
+      await playwrightLogoutPlatform(platformId);
+
+      // 再清除数据库中的登录状态
       await prisma.platform.update({
         where: { id: platformId },
         data: {

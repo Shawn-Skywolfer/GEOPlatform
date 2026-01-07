@@ -16,6 +16,7 @@ export default function PlatformsPage() {
   const [platforms, setPlatforms] = useState<Platform[]>([]);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [loginInProgress, setLoginInProgress] = useState<string | null>(null);
 
   useEffect(() => {
     fetchPlatforms();
@@ -40,15 +41,9 @@ export default function PlatformsPage() {
     }
   };
 
-  const handleLogin = async (platformId: string, platformName: string, platformUrl: string) => {
-    if (!confirm(`即将标记"${platformName}"为已登录状态。\n\n请注意：\n1. 系统将打开${platformName}的官网\n2. 您需要在浏览器中手动登录该平台\n3. 确认登录后，点击"确定"继续\n\n是否继续？`)) {
-      return;
-    }
-
-    // 打开平台官网
-    window.open(platformUrl, '_blank');
-
+  const handleLogin = async (platformId: string, platformName: string) => {
     setActionLoading(platformId);
+    setLoginInProgress(platformId);
     try {
       const response = await fetch('/api/platforms/login', {
         method: 'POST',
@@ -59,15 +54,41 @@ export default function PlatformsPage() {
       const data = await response.json();
 
       if (data.success) {
-        alert(`✅ ${platformName}已标记为已登录！\n\n${data.message}`);
-        fetchPlatforms();
+        alert(`🌐 ${data.message}\n\n请在打开的浏览器中完成登录，然后点击"确认登录完成"按钮。`);
       } else {
         alert(`登录失败: ${data.message}`);
+        setLoginInProgress(null);
+      }
+    } catch (error) {
+      alert(`操作失败: ${error}`);
+      setLoginInProgress(null);
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const handleConfirmLogin = async (platformId: string, platformName: string) => {
+    setActionLoading(platformId);
+    try {
+      const response = await fetch('/api/platforms/confirm-login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ platformId }),
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        alert(`✅ ${platformName}登录成功！`);
+        fetchPlatforms();
+      } else {
+        alert(`确认登录失败: ${data.message}`);
       }
     } catch (error) {
       alert(`操作失败: ${error}`);
     } finally {
       setActionLoading(null);
+      setLoginInProgress(null);
     }
   };
 
@@ -132,11 +153,11 @@ export default function PlatformsPage() {
               <p>📱 <strong>登录流程：</strong></p>
               <ol className="list-decimal list-inside space-y-1 ml-2">
                 <li>点击平台卡片上的"登录"按钮</li>
-                <li>系统会在新标签页打开对应平台的官网</li>
-                <li>您在浏览器中手动完成登录流程</li>
-                <li>确认登录后，系统将平台标记为"已登录"状态</li>
+                <li>系统会自动打开Playwright浏览器并导航到平台官网</li>
+                <li>您在打开的浏览器中手动完成登录流程</li>
+                <li>登录完成后，返回本页面点击"确认登录完成"按钮</li>
               </ol>
-              <p className="mt-3">✅ 已登录的平台可以用于自动提问功能</p>
+              <p className="mt-3">✅ 已登录的平台可以用于自动提问功能，无需重复登录</p>
             </CardContent>
           </Card>
 
@@ -157,7 +178,8 @@ export default function PlatformsPage() {
                 <Card
                   key={platform.id}
                   className={`transition-all hover:shadow-md ${
-                    platform.isLoggedIn ? 'border-green-500 bg-green-50 dark:bg-green-950/20' : ''
+                    platform.isLoggedIn ? 'border-green-500 bg-green-50 dark:bg-green-950/20' :
+                    loginInProgress === platform.id ? 'border-blue-500 bg-blue-50 dark:bg-blue-950/20' : ''
                   }`}
                 >
                   <CardHeader>
@@ -166,11 +188,13 @@ export default function PlatformsPage() {
                       <div className="flex items-center space-x-2">
                         <div
                           className={`w-3 h-3 rounded-full ${
-                            platform.isLoggedIn ? 'bg-green-500' : 'bg-gray-300'
+                            platform.isLoggedIn ? 'bg-green-500' :
+                            loginInProgress === platform.id ? 'bg-blue-500 animate-pulse' : 'bg-gray-300'
                           }`}
                         />
                         <span className="text-xs text-muted-foreground">
-                          {platform.isLoggedIn ? '已登录' : '未登录'}
+                          {platform.isLoggedIn ? '已登录' :
+                           loginInProgress === platform.id ? '登录中...' : '未登录'}
                         </span>
                       </div>
                     </div>
@@ -197,14 +221,42 @@ export default function PlatformsPage() {
                           {actionLoading === platform.id ? '处理中...' : '登出'}
                         </Button>
                       </div>
+                    ) : loginInProgress === platform.id ? (
+                      <div className="space-y-2">
+                        <div className="flex items-center space-x-2 text-sm text-blue-600 dark:text-blue-400">
+                          <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                          </svg>
+                          <span>请在浏览器中登录</span>
+                        </div>
+                        <Button
+                          variant="default"
+                          size="sm"
+                          className="w-full"
+                          onClick={() => handleConfirmLogin(platform.id, platform.name)}
+                          disabled={actionLoading === platform.id}
+                        >
+                          {actionLoading === platform.id ? '处理中...' : '确认登录完成'}
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="w-full"
+                          onClick={() => setLoginInProgress(null)}
+                          disabled={actionLoading === platform.id}
+                        >
+                          取消
+                        </Button>
+                      </div>
                     ) : (
                       <Button
                         size="sm"
                         className="w-full"
-                        onClick={() => handleLogin(platform.id, platform.name, platform.url)}
+                        onClick={() => handleLogin(platform.id, platform.name)}
                         disabled={actionLoading === platform.id}
                       >
-                        {actionLoading === platform.id ? '处理中...' : '登录'}
+                        {actionLoading === platform.id ? '打开浏览器中...' : '登录'}
                       </Button>
                     )}
                   </CardContent>
